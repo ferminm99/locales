@@ -47,12 +47,12 @@
         <!-- Tabla de artículos -->
         <ResponsiveTable :headers="headers" :items="articulosFiltrados">
             <template #item.actions="{ item }">
-                <v-btn icon @click="openEditDialog(item)"
-                    ><v-icon>mdi-pencil-outline</v-icon></v-btn
-                >
-                <v-btn icon @click="openDeleteConfirm(item)"
-                    ><v-icon>mdi-trash-can-outline</v-icon></v-btn
-                >
+                <v-btn icon @click="openEditDialog(item)">
+                    <v-icon>mdi-pencil-outline</v-icon>
+                </v-btn>
+                <v-btn icon @click="openDeleteConfirm(item)">
+                    <v-icon>mdi-trash-can-outline</v-icon>
+                </v-btn>
             </template>
         </ResponsiveTable>
 
@@ -82,9 +82,9 @@
             <v-card>
                 <v-card-title class="d-flex justify-space-between align-center">
                     {{ isEdit ? "Editar" : "Agregar" }} Artículo
-                    <v-btn icon @click="dialog = false"
-                        ><v-icon color="red">mdi-close</v-icon></v-btn
-                    >
+                    <v-btn icon @click="dialog = false">
+                        <v-icon color="red">mdi-close</v-icon>
+                    </v-btn>
                 </v-card-title>
                 <v-card-text>
                     <v-form ref="form">
@@ -133,12 +133,25 @@
                                 type="number"
                                 required
                             />
-                            <v-textarea
-                                v-model="v.atributosJson"
-                                label="Atributos (JSON)"
-                                hint='Ej: {"talle":"36","color":"verde"}'
-                                persistent-hint
-                            />
+
+                            <!-- ← INICIO: selección amigable de atributos -->
+                            <div
+                                v-for="attr in atributosDefinidos"
+                                :key="attr.id"
+                                class="mt-2"
+                            >
+                                <v-select
+                                    :label="attr.nombre"
+                                    :items="valoresPorAtributo[attr.id] || []"
+                                    item-text="valor"
+                                    item-value="valor"
+                                    v-model="v.atributos[attr.slug]"
+                                    dense
+                                    clearable
+                                />
+                            </div>
+                            <!-- ← FIN: selección amigable de atributos -->
+
                             <v-btn
                                 text
                                 small
@@ -167,9 +180,9 @@
         <!-- Diálogo Confirmar Eliminación -->
         <v-dialog v-model="confirmDeleteDialog" max-width="400px">
             <v-card>
-                <v-card-title class="headline">
-                    ¿Eliminar artículo?
-                </v-card-title>
+                <v-card-title class="headline"
+                    >¿Eliminar artículo?</v-card-title
+                >
                 <v-card-text>
                     ¿Estás seguro de que querés eliminar
                     <strong>{{ articuloAEliminar?.nombre }}</strong
@@ -228,6 +241,11 @@ export default {
             articuloAEliminar: null,
             porcentajeAumento: 0,
             search: "",
+
+            // ← NUEVO: para traer atributos definidos y sus valores
+            atributosDefinidos: [],
+            valoresPorAtributo: {},
+
             // Formulario de artículo + variantes
             form: {
                 id: null,
@@ -236,7 +254,12 @@ export default {
                 categoria: "",
                 precio_base: 0,
                 variantes: [
-                    { sku: "", stock: 0, precio: 0, atributosJson: "{}" },
+                    {
+                        sku: "",
+                        stock: 0,
+                        precio: 0,
+                        atributos: {}, // ← MODIFICADO: antes atributosJson
+                    },
                 ],
             },
             articulos: [],
@@ -267,6 +290,7 @@ export default {
     },
 
     mounted() {
+        // Sync artículos
         useSyncedCache({
             key: ARTICULOS_KEY,
             apiPath: "/articulos/actualizados-desde",
@@ -274,6 +298,16 @@ export default {
             onData: (data) =>
                 (this.articulos = Array.isArray(data) ? data : []),
             setLoading: (v) => (this.loading = v),
+        });
+
+        // ← NUEVO: Cargar atributos definidos y sus valores
+        axios.get("/api/atributos").then((r) => {
+            this.atributosDefinidos = r.data;
+            r.data.forEach((attr) => {
+                axios.get(`/api/atributos/${attr.id}/valores`).then((r2) => {
+                    this.$set(this.valoresPorAtributo, attr.id, r2.data);
+                });
+            });
         });
 
         window.addEventListener("notifyCacheChange", this.handleCacheSync);
@@ -293,7 +327,7 @@ export default {
                 sku: "",
                 stock: 0,
                 precio: 0,
-                atributosJson: "{}",
+                atributos: {}, // ← MODIFICADO
             });
         },
         removeVariante(i) {
@@ -309,7 +343,7 @@ export default {
                 categoria: "",
                 precio_base: 0,
                 variantes: [
-                    { sku: "", stock: 0, precio: 0, atributosJson: "{}" },
+                    { sku: "", stock: 0, precio: 0, atributos: {} }, // ← MODIFICADO
                 ],
             };
             this.dialog = true;
@@ -331,7 +365,7 @@ export default {
                             sku: v.sku,
                             stock: v.stock,
                             precio: v.precio,
-                            atributosJson: JSON.stringify(v.atributos),
+                            atributos: v.atributos, // ← ahora ya viene objeto
                         })),
                     };
                     this.dialog = true;
@@ -343,7 +377,7 @@ export default {
             if (!this.validateForm()) return;
             this.loading = true;
 
-            // Parsear JSON de atributos
+            // ← MODIFICADO: payload toma directamente v.atributos
             const payload = {
                 nombre: this.form.nombre,
                 descripcion: this.form.descripcion,
@@ -353,7 +387,7 @@ export default {
                     sku: v.sku,
                     stock: v.stock,
                     precio: v.precio,
-                    atributos: JSON.parse(v.atributosJson || "{}"),
+                    atributos: v.atributos,
                 })),
             };
 
@@ -380,10 +414,6 @@ export default {
                 .finally(() => (this.loading = false));
         },
 
-        openDeleteConfirm(item) {
-            this.articuloAEliminar = item;
-            this.confirmDeleteDialog = true;
-        },
         deleteArticulo() {
             this.loading = true;
             axios
